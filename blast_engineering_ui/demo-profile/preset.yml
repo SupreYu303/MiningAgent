@@ -1,0 +1,3 @@
+name: BLAST Studio
+description: 仅用于本地立井钻爆工程 Workspace 的最小权限演示模式：没有通用 PowerShell、没有通用文件系统工具，工程计算只经 blast_engine（固定 argv 白名单调用现有 adapter CLI），白名单之外的一条命令需要用户单次审批。会话沙箱保持 workspace-write，不启用 danger-full-access。
+order: 0

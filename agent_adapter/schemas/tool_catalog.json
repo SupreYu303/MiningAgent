@@ -1,0 +1,143 @@
+{
+  "schema_version": "agent_adapter.tools.v1.0",
+  "description": "立井钻爆设计系统 · Agent 工具目录（供 DeepSeek Harness Skill 与 Phase 2 MCP server 共用同一份定义）。所有工具都不含工程算法，仅调用 51_one_click_end_to_end 生产流水线或只读其真实产物。",
+  "transport": {
+    "current": "python -m agent_adapter.cli <tool>",
+    "phase2": "MCP stdio（@deepseek-ai/dsh-mcp-client，serverName=blast）"
+  },
+  "envelope_keys": ["success", "tool", "task_id", "case_id", "status", "input",
+                    "results", "metrics", "warnings", "artifacts", "next_actions",
+                    "error", "elapsed_s"],
+  "tools": [
+    {
+      "name": "doctor",
+      "cli": "doctor",
+      "purpose": "环境自检；确认能否真实计算（不跑流水线）",
+      "input": {"no_smoke": {"type": "boolean", "default": false}},
+      "outputs": ["results.checks", "results.environment"],
+      "recomputes": false
+    },
+    {
+      "name": "validate_project_input",
+      "cli": "validate-input",
+      "purpose": "校验并标准化输入参数；返回缺失项与 Core 原生错误",
+      "input": {
+        "request": {"type": "object", "note": "7 个必填工程参数 + 可选覆盖参数"}
+      },
+      "outputs": ["results.valid", "results.errors", "results.missing_required",
+                  "results.contract", "status"],
+      "recomputes": false
+    },
+    {
+      "name": "run_project_analysis",
+      "cli": "run-analysis",
+      "purpose": "调用既有生产流水线生成完整方案（唯一重算入口）",
+      "input": {
+        "request": {"type": "object"},
+        "background": {"type": "boolean", "default": true},
+        "parent_task_id": {"type": "string", "nullable": true},
+        "use_ml": {"type": "boolean", "default": true}
+      },
+      "outputs": ["task_id", "status", "results.mode", "results.poll_with"],
+      "recomputes": true
+    },
+    {
+      "name": "task_status",
+      "cli": "task-status",
+      "purpose": "查询后台任务相位与耗时",
+      "input": {"task_id": {"type": "string", "nullable": true}},
+      "outputs": ["results.phase", "results.running", "metrics.elapsed_s", "results.package_dir"],
+      "recomputes": false
+    },
+    {
+      "name": "get_canonical_result",
+      "cli": "canonical-result",
+      "purpose": "Canonical Result Contract：把 Core 产物整理为 Agent 唯一标准解释（ood 两概念分离 / review 两侧分离 / 每个字段带 provenance）",
+      "input": {
+        "task_id": {"type": "string", "nullable": true},
+        "case_id": {"type": "string", "nullable": true},
+        "with_render": {"type": "boolean", "default": true},
+        "with_raw": {"type": "boolean", "default": false}
+      },
+      "outputs": ["results.canonical", "results.render"],
+      "recomputes": false
+    },
+    {
+      "name": "validate_result_consistency",
+      "cli": "validate-result-consistency",
+      "purpose": "Result Consistency Validator：只读校验 OOD/复核/置信度/孔数守恒/质量平衡/状态-标记自洽/产物存在/报告一致/对比引用/父子任务",
+      "input": {
+        "task_id": {"type": "string", "nullable": true},
+        "case_id": {"type": "string", "nullable": true},
+        "compare": {"type": "array", "items": {"type": "string"}, "nullable": true}
+      },
+      "outputs": ["results.valid", "results.errors", "results.warnings", "results.checks"],
+      "recomputes": false,
+      "never_modifies": true
+    },
+    {
+      "name": "get_project_result",
+      "cli": "get-result",
+      "purpose": "只读读取真实结果（任务或历史冻结案例），支持 summary/package/explain 与单文件",
+      "input": {
+        "task_id": {"type": "string", "nullable": true},
+        "case_id": {"type": "string", "nullable": true},
+        "section": {"enum": ["summary", "package", "explain"], "default": "summary"},
+        "json_name": {"type": "string", "nullable": true}
+      },
+      "outputs": ["status", "results.summary", "metrics", "artifacts", "results.ready_fields"],
+      "recomputes": false
+    },
+    {
+      "name": "list_project_tasks",
+      "cli": "list-tasks",
+      "purpose": "最近任务列表，用于自然语言指代（“刚才那个”）的消歧",
+      "input": {"limit": {"type": "integer", "nullable": true}},
+      "outputs": ["results.tasks", "results.running"],
+      "recomputes": false
+    },
+    {
+      "name": "compare_project_results",
+      "cli": "compare-results",
+      "purpose": "两个真实方案的输入与指标字段级差异（delta = b - a）",
+      "input": {
+        "task_a": {"type": "string", "nullable": true},
+        "task_b": {"type": "string", "nullable": true},
+        "case_a": {"type": "string", "nullable": true},
+        "case_b": {"type": "string", "nullable": true}
+      },
+      "outputs": ["results.a", "results.b", "results.input_diff", "results.metric_diff",
+                  "results.status_change"],
+      "recomputes": false
+    },
+    {
+      "name": "generate_project_figures",
+      "cli": "generate-figures",
+      "purpose": "基于既有快照用 Core 冻结渲染器重新出图（PNG/PDF/SVG/DXF）",
+      "input": {
+        "task_id": {"type": "string", "nullable": true},
+        "case_id": {"type": "string", "nullable": true},
+        "targets": {"type": "array", "items": {"enum": ["plan", "3d", "charge"]}}
+      },
+      "outputs": ["results.out_dir", "artifacts"],
+      "recomputes": false
+    },
+    {
+      "name": "generate_project_report",
+      "cli": "generate-report",
+      "purpose": "用该任务保存的真实 result 生成 10 章节中文报告",
+      "input": {
+        "task_id": {"type": "string", "nullable": true},
+        "case_id": {"type": "string", "nullable": true}
+      },
+      "outputs": ["results.report_path", "artifacts"],
+      "recomputes": false
+    }
+  ],
+  "hard_requirements": [
+    "输出的工程数值不得被 Agent 改写、插值或估算",
+    "图件与报告必须来自 generate-* 工具产生的真实文件",
+    "历史冻结案例（51/outputs）只读，不重算、不覆盖",
+    "工具返回的 artifacts[].path 为绝对路径，可直接用于界面展示"
+  ]
+}
