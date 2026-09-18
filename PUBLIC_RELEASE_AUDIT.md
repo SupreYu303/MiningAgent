@@ -77,6 +77,15 @@
 有 9 篇文档（插件 7 篇 + `agent_adapter/README.md` + `docs/RESULT_CONTRACT.md`）在正文前
 加了一段 **公开源码版说明**，声明其原为内部记录、已脱敏、且内部图集未随发布。
 
+定稿复核时另做了 3 处**最小修正**（落在同一分支的后续提交，便于追溯；修正后已逐行复核全仓库
+`%USERPROFILE%` / `$env:USERPROFILE` 共 40 处上下文，全部与所在 shell 一致）：
+
+1. `blast_engineering_ui/README.md` 回滚脚本的 PowerShell **续行**由 `%USERPROFILE%` 改为
+   `$env:USERPROFILE`（`%VAR%` 只在 cmd 中展开；续行不以 `Copy-Item` 开头，因此未被上表规则捕获）；
+2. `agent_adapter/README.md` 标题由内部文件名改为包名，并补一段「公开源码版对应关系」，
+   说明变更清单中哪些项目未随本次发布；
+3. 本文件 §5 的扫描结论按复核后的真实命中数（18 = 13 自引用 + 5 良性）定稿。
+
 > 私有仓库内的任何文件**均未被修改**：脱敏只发生在复制到本仓库的副本上，可随时用
 > 本文件 §5 的规则重建。
 

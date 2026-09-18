@@ -132,7 +132,7 @@ cmd /c mklink /J "%USERPROFILE%\.dsh\profiles\desktop\node_modules\blast-enginee
 ```powershell
 # A. 关闭插件行
 Copy-Item "$env:USERPROFILE\.dsh\profiles\desktop\cordis.patch.yml.bak-blast-ui-phase2" `
-          "%USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml" -Force
+          "$env:USERPROFILE\.dsh\profiles\desktop\cordis.patch.yml" -Force
 # B. 移除包挂载（只删联接，不动仓库文件）
 cmd /c rmdir "%USERPROFILE%\.dsh\profiles\node_modules\blast-engineering-ui"
 cmd /c rmdir "%USERPROFILE%\.dsh\profiles\desktop\node_modules\blast-engineering-ui"

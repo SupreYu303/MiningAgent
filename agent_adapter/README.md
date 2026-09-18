@@ -1,4 +1,4 @@
-# AGENT_ADAPTER_README — 把本系统接入 DeepSeek Harness（Phase 1 MVP）
+# agent_adapter —— 把本系统接入 DeepSeek Harness（Agent 适配层）
 
 > **公开源码版说明**：本文件原为内部交付 / 真机验收记录。发布时做了两件事——(1) 剥离主机名、用户名与绝对路径等本机信息（替换规则见根目录 `PUBLIC_RELEASE_AUDIT.md`）；(2) 正文中形如 `docs/screenshots/**` 的图片属内部验收图集，未随公开版发布，公开版只保留 `docs/assets/` 下的精选图集。
 > 另注：确定性核心流水线（`51_one_click_end_to_end/`）与项目级 Skill（`.dsh/skills/shaft-blast-design/`）不属本次公开范围，详见 `PUBLIC_RELEASE_AUDIT.md`。
@@ -29,6 +29,11 @@ agent_adapter/schemas/tool_catalog.json      # 工具目录（Phase 2 MCP 复用
 
 Phase 1.6 另新增三份文档：`RESULT_CONTRACT_AUDIT.md`（字段溯源审计）、
 `PHASE1_6_RESULT_CONTRACT.md`（本轮结论）、`SANDBOX_RUNTIME_DIAGNOSIS.md`（沙箱/joblib 诊断）。
+
+> **公开源码版对应关系**：上面这份清单记录的是当时在**内部工程仓库**中的变更。其中
+> `AGENTIZATION_ARCHITECTURE.md`、`AGENTS.md`、`.dsh/**`（项目级 Skill）与根级审计文档
+> **未随本次公开版发布**；其内容以本仓库的 `README.md` + `PUBLIC_RELEASE_AUDIT.md` 为公开替代，
+> 结果契约则以 `docs/RESULT_CONTRACT.md` 发布。
 
 **未修改**：`51_one_click_end_to_end/`、`17_/23_/43_/47_/49_/50_/53_/55_/PREBLAST_*`、
 `52_gui_v1/`、`56_/57_` 的任何文件；DSH 安装目录与其配置文件也未被改动。
