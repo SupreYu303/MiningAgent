@@ -1,0 +1,35 @@
+{
+  "name": "blast-live-voice",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BLAST Studio Live Voice product layer: Qwen Audio Realtime Plus -> normalized engineering intent -> Parameter Diff / Action Gate -> human confirmation -> the project's own deterministic pipeline. The realtime voice model never executes an engineering change.",
+  "type": "module",
+  "main": "./lib/host.mjs",
+  "exports": {
+    ".": "./lib/host.mjs",
+    "./agent-tools": "./lib/agent-tools.mjs",
+    "./studio": "./lib/studio.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/host.mjs",
+    "lib/routes.mjs",
+    "lib/gate.mjs",
+    "lib/design.mjs",
+    "lib/adapter.mjs",
+    "lib/config.mjs",
+    "lib/agent-tools.mjs",
+    "lib/studio.mjs",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

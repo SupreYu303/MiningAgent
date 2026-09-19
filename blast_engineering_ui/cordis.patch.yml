@@ -1,0 +1,16 @@
+# blast-engineering-ui —— third-party bundle patch layer.
+#
+# Applied after @deepseek-ai/dsh-base and @deepseek-ai/dsh-web-app (and after
+# any other bundle this profile lists), before the profile's own
+# cordis.patch.yml. One row only:
+#
+#   * the package is a DSH "dual-face" row — the node half (lib/host.mjs) is a
+#     host plugin that serves the real project data over the webServer, and the
+#     same package declares `dsh.client` so @deepseek-ai/dsh-client-modules
+#     puts its browser bundle (lib/client.js) into the __DSH_BOOT__ roster.
+#
+# DSH core is NOT modified by this bundle: the row is a composition fact, and
+# removing the row (or the profile dependency) removes the plugin entirely.
+- insert:
+    - id: blast-engineering-ui
+      name: 'blast-engineering-ui'

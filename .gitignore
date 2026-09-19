@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# .gitignore — BLAST Studio / MiningAgent public source release
+# Runtime output, local secrets, model blobs and harness state are never
+# committed; only source, schemas, docs and the curated screenshot set are.
+# ---------------------------------------------------------------------------
+
+# ---- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node -------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.parcel-cache/
+.cache/
+blast_engineering_ui/.cache/
+
+# ---- env / secrets ----------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+credentials*.json
+.credentials*
+secrets*.json
+
+# ---- DeepSeek Harness (DSH) local state -------------------------------------
+.dsh/
+
+# ---- models / large binary blobs -------------------------------------------
+*.onnx
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+models/
+sensevoice/
+
+# ---- adapter runtime + evaluation probes ----------------------------------
+agent_adapter/workspace/
+_agent_probe/
+_ui_probe/
+_voice_probe/
+_stage_probe/
+.agent_tmp/
+*.log
+
+# ---- OS / IDE ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

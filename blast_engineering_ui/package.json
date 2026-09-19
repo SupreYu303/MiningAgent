@@ -1,0 +1,43 @@
+{
+  "name": "blast-engineering-ui",
+  "version": "0.4.0-conversation-native",
+  "private": true,
+  "description": "Conversation-native engineering workspace for the shaft-blast design project (DSH client plugin: the shell's own three-column AppFrame — a Project/Case/Design-Version/Thread/Artifact context sidebar, the untouched native conversation with BLAST engineering nodes in each turn tail, and an in-place artifact Preview column — plus voice as a composer input mode and a structured parameter-change gate; ships the `blast-demo` minimal-permission Agent Profile tools as an optional host row).",
+  "type": "module",
+  "main": "./lib/host.mjs",
+  "exports": {
+    ".": "./lib/host.mjs",
+    "./client": "./lib/client.js",
+    "./blast-tools": "./lib/blast-tools.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/host.mjs",
+    "lib/case-store.mjs",
+    "lib/api.mjs",
+    "lib/voice-script.mjs",
+    "lib/blast-tools.mjs",
+    "lib/client.js",
+    "docs/CONVERSATION_NATIVE_UI_REDESIGN.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}
