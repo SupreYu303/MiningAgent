@@ -6,6 +6,8 @@
 //
 // 执行入口只有一处：`POST /blast-live-voice/gate/confirm`（人工点击【创建版本】）。
 // `/gate/request` 只创建 pending 闸门；`/permit/check` 只做只读校验，永不执行。
+import fs from 'node:fs'
+import path from 'node:path'
 import { PREFIX, nowIso, REALTIME_STATUS_PATH, VOICE_PROTOCOL } from './config.mjs'
 
 function sendJson(res, code, body) {
@@ -28,7 +30,7 @@ function readBody(req) {
   })
 }
 
-export function createHandler({ design, gate, caseId, repoRoot, gatePreset, log }) {
+export function createHandler({ design, gate, caseId, repoRoot, gatePreset, runtimeDir, log }) {
   /** Live 通话在场：渲染进程上报（见 gate.notePresence 的注释）。 */
   function voiceState() {
     const presence = gate.voicePresence()
@@ -88,6 +90,22 @@ export function createHandler({ design, gate, caseId, repoRoot, gatePreset, log 
         const body = await readBody(req)
         gate.notePresence({ active: body.active, phase: body.phase })
         return sendJson(res, 200, { ok: true, voice: voiceState() })
+      }
+      // Live Transcript 的审计轨迹：只记录**文本**与「有没有写成一条正常 User Message」。
+      // 字幕永不触发工程动作（没有闸门请求、没有 run_analysis），这里也只写自己的 runtime 目录。
+      if (p === '/transcript' && req.method === 'POST') {
+        const body = await readBody(req)
+        const record = {
+          at: nowIso(),
+          text: String(body.text ?? '').slice(0, 2000),
+          submitted: Boolean(body.submitted),
+          reason: String(body.reason ?? '').slice(0, 80),
+        }
+        try {
+          fs.mkdirSync(runtimeDir, { recursive: true })
+          fs.appendFileSync(path.join(runtimeDir, 'transcripts.jsonl'), `${JSON.stringify(record)}\n`, 'utf8')
+        } catch (error) { /* the audit trail must never break a call */ void error }
+        return sendJson(res, 200, { ok: true })
       }
       if (p === '/design') {
         const snapshot = design.summarize(await design.readDesign({ force: url.searchParams.get('force') === '1' }))

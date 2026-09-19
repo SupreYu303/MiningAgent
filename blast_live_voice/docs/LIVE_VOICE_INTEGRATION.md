@@ -64,6 +64,24 @@
 3. **状态面**：闸门 pending 时 `task_id` 为空；`/gate/confirm` 是唯一执行入口；
    `/permit/check` 只读校验。验收脚本对这三条都有断言。
 
+## 4.1 Live Transcript（字幕层）—— 只读镜像 + 一次诚实的写回
+
+| 关注点 | 做法 |
+|---|---|
+| 文本来源 | provider 自己的通话卡片（本插件用 CSS 把它收起，但组件仍在渲染）：`[aria-label="实时语音通话"] [class*="userText"\|"assistantText"]`——只读，provider 零改动 |
+| 相位来源 | provider 自己的通话控件（通话中自称「结束实时语音」）+ 其相位元素 `data-phase` |
+| 显示 | Composer 那一行的**单行省略**字幕：`🎙 用户当前语音` / `🔊 Agent 当前语音`；没有面板、没有 Orb、没有新页面 |
+| final 判定 | provider 离开 `listening` 相位的那一刻，最后读到的用户文本即该句最终转写（空文本 / 与上一句重复不算） |
+| 写入会话 | 走**原生 Composer** 的 draft + submit（与手打完全同一条路），因此它在对话里就是一条普通 User Message |
+| 不重复 | 若 provider 已为该句做 handoff（其 user message 带 `<spoken_input>` 原文），检测到回合数已增加就**跳过**写入 |
+| 审计 | `runtime/transcripts.jsonl`：`{text, submitted, reason}`——只有文本与结果，**没有**任何工程动作 |
+| 执行权限 | **无**：字幕路径里没有 `/gate/request`、没有 `run_analysis`、没有 `blast_engine`（`client-contract-test.mjs` 有负向断言）；工程侧仍停在 Parameter Diff + 人工【创建版本】，且 Live 通话中 `run_analysis` 仍受 permit 互锁 |
+
+**为什么需要"跳过重复"这一条**：provider 的 handoff 消息里本来就带用户原话
+（`<realtime_delegation>…<spoken_input>原文</spoken_input>`），所以工程类话语在会话里
+**已经**留下用户原话；再写一遍会变成两条用户消息、并可能开出两张闸门。检测方式是按会话回合数：
+最终转写后 2.5 s 内若已出现新回合，就认为 provider 已经记录过这句。
+
 ## 5. 冷启动修复（POC 的 process / display / profile id 混用教训）
 
 * `blast_live_voice/lib/studio.mjs` 是 **profile id / preset id / 端口 / 全部路径的唯一来源**；

@@ -59,7 +59,10 @@ const FILES = [
   'blast_engineering_ui/tools/install-demo-profile.mjs',
   'blast_engineering_ui/tools/demo-profile-test.mjs',
 ]
-const BINARIES = ['blast_live_voice/docs/screenshots/live_voice_gate.png']
+const BINARIES = [
+  'blast_live_voice/docs/screenshots/live_voice_gate.png',
+  'blast_live_voice/docs/screenshots/live_voice_transcript.png',
+]
 
 /** 确定性脱敏规则（顺序即优先级）；正则同样由拼接常量构成。 */
 const escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

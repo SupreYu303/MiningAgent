@@ -48,7 +48,7 @@ export function apply(ctx, config = {}) {
   const design = createDesignReader({ runAdapter, caseId })
   const gate = createGateMachine({ runAdapter, readDesign: design.readDesign, runtimeDir, log, recordProvenance })
 
-  const { handle } = createHandler({ design, gate, caseId, repoRoot, gatePreset, log })
+  const { handle } = createHandler({ design, gate, caseId, repoRoot, gatePreset, runtimeDir, log })
   registerRoutes(ctx, handle)
 
   log('info', `mounted (repo ${repoRoot}, case ${caseId}, preset ${gatePreset}, gate ${gate.current()?.gateId ?? 'none yet'}, api ${PREFIX})`)

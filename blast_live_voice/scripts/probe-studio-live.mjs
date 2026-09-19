@@ -210,6 +210,98 @@ try {
   try { gateFile = JSON.parse(fs.readFileSync(path.join(runtimeDir, 'gate.json'), 'utf8')) } catch { gateFile = null }
   check('取消后闸门文件里没有 task_id（未启动计算）', gateFile?.taskId === null || gateFile?.taskId === undefined,
     `taskId=${String(gateFile?.taskId)}`)
+
+  // ⑧ Live Transcript（字幕层）：只在 --transcript-sim 时跑。
+  // 它**不**改 provider：把 provider 自己的那段 DOM（相位元素 / 通话按钮 / 转写面）
+  // 在页面里合成出来，让插件按它真实依赖的选择器去读——因此验证的是我们的代码路径，
+  // 而不是一句声明。注意：这一节会真的把一句用户话写进当前会话（这是被测行为本身）。
+  if (argv.includes('--transcript-sim')) {
+    const SIM_USER = '把井筒直径改成 6 米'
+    const SIM_AGENT = '井筒直径要改成 6 米，我先给出参数差异，等你确认。'
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    await evaluate(client, `(() => {
+      const sim = document.createElement('div');
+      sim.id = 'beu-live-sim';
+      sim.innerHTML = '<span aria-label="实时语音：正在聆听" data-phase="listening"></span>'
+        + '<button aria-label="结束实时语音"></button>'
+        + '<div aria-label="实时语音通话"><p class="sim_userText"></p><p class="sim_assistantText"></p></div>';
+      document.body.appendChild(sim);
+      return true;
+    })()`)
+    const setSim = (phase, user, assistant) => evaluate(client, `(() => {
+      const sim = document.querySelector('#beu-live-sim');
+      if (!sim) return false;
+      sim.querySelector('[aria-label^="实时语音："]').setAttribute('data-phase', ${JSON.stringify(phase)});
+      if (${JSON.stringify(user)} !== null) sim.querySelector('[class*="sim_userText"]').textContent = ${JSON.stringify(user)};
+      if (${JSON.stringify(assistant)} !== null) sim.querySelector('[class*="sim_assistantText"]').textContent = ${JSON.stringify(assistant)};
+      return true;
+    })()`)
+    const stripState = () => evaluate(client, `(() => {
+      const strip = document.querySelector('[data-voice-strip]');
+      const line = document.querySelector('[data-live-transcript]');
+      return {
+        call: strip ? strip.getAttribute('data-live-call') : null,
+        phase: strip ? strip.getAttribute('data-live-phase') : null,
+        finals: Number(strip ? strip.getAttribute('data-live-finals') : 0),
+        submitted: Number(strip ? strip.getAttribute('data-live-submitted') : 0),
+        skipped: Number(strip ? strip.getAttribute('data-live-skipped') : 0),
+        turn: strip ? strip.getAttribute('data-voice-turn') : null,
+        line: line ? (line.textContent || '') : null,
+        kind: line ? line.getAttribute('data-live-transcript') : null,
+        lines: document.querySelectorAll('[data-live-transcript]').length,
+      };
+    })()`)
+
+    await setSim('listening', SIM_USER, '')
+    await sleep(1600)
+    const interim = await stripState()
+    check('用户当前语音以单行字幕实时显示',
+      interim.kind === 'user' && (interim.line || '').includes(SIM_USER),
+      `kind=${interim.kind} line=${(interim.line || '').slice(0, 40)}`)
+    check('字幕只有一行（不是面板）', interim.lines === 1, `lines=${interim.lines}`)
+
+    await setSim('speaking', null, SIM_AGENT)
+    await sleep(1400)
+    const speaking = await stripState()
+    check('Agent 当前语音同样以字幕流式显示',
+      speaking.kind === 'assistant' && (speaking.line || '').includes('参数差异'),
+      `kind=${speaking.kind} line=${(speaking.line || '').slice(0, 40)}`)
+
+    const turnsBefore = Number(speaking.turn || 0)
+    await setSim('thinking', null, null)
+    await sleep(1400)
+    const finalized = await stripState()
+    check('离开「聆听」即判定为最终转写', finalized.finals >= 1, `finals=${finalized.finals}`)
+
+    await sleep(5000)
+    const written = await stripState()
+    const pageText = await evaluate(client, `document.body.innerText`)
+    check('最终转写作为正常 User Message 写入当前 Conversation',
+      written.submitted >= 1 && Number(written.turn || 0) > turnsBefore && String(pageText).includes(SIM_USER),
+      `submitted=${written.submitted} turn=${turnsBefore}→${written.turn}`)
+
+    const liveState = await evaluate(client, `fetch('/blast-live-voice/state', { cache: 'no-store' }).then(r => r.json())`)
+    const liveGate = liveState?.gate
+    check('字幕没有执行权限（工程侧仍停在人工确认：task_id 为空）',
+      !liveGate || (liveGate.taskId === null && (liveGate.status === 'pending' || liveGate.status === 'cancelled')),
+      `gate=${liveGate?.status} taskId=${String(liveGate?.taskId)}`)
+
+    let audit = []
+    try {
+      audit = fs.readFileSync(path.join(runtimeDir, 'transcripts.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+    } catch { audit = [] }
+    const last = audit[audit.length - 1]
+    check('Live Transcript 有审计轨迹（文本 + 是否写成 User Message）',
+      Boolean(last) && last.submitted === true && String(last.text).includes(SIM_USER),
+      last ? `reason=${last.reason}` : 'no record')
+
+    await evaluate(client, `(() => { const sim = document.querySelector('#beu-live-sim'); if (sim) sim.remove(); return true })()`)
+    await sleep(1800)
+    const ended = await stripState()
+    check('通话结束后字幕消失、Composer 恢复默认',
+      ended.call === '0' && ended.lines === 0, `call=${ended.call} lines=${ended.lines}`)
+  }
 } finally {
   client.close()
 }

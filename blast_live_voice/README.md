@@ -51,6 +51,24 @@ node blast_live_voice\scripts\deploy-studio-live.mjs --uninstall
 node blast_engineering_ui\tools\install-demo-profile.mjs --install
 ```
 
+## Live Transcript（实时字幕）
+
+* **用户当前语音**：在 Composer 那一行里以**单行省略**字幕实时显示（`🎙 …`），interim 也显示；
+* **Agent 当前语音**：同一行切换为 `🔊 …` 流式显示；
+* **final transcript → 正常 User Message**：用户说完（provider 离开 `listening` 相位）后，
+  这一句话会作为**普通用户消息**写入当前 Conversation（走原生 Composer 的 draft + submit，
+  与会话里手打一模一样）；
+* 若 provider 已经为这句话做了 handoff（它的 user message 里带 `<spoken_input>` 原文），
+  我们**不重复写**——它会记录在 hosts 侧 `runtime/transcripts.jsonl`（`reason=already-in-conversation(handoff)`）；
+* **字幕没有执行权限**：字幕路径里没有闸门请求、没有 `run_analysis`、没有 `blast_engine`；
+  参数修改仍然只能由人工在 Parameter Diff 上点【创建版本】触发（契约测试对此有负向断言）。
+
+来源与边界（如实）：provider 的转写面（它自己的通话卡片，被本插件用 CSS 收起但仍在渲染）
+是我们**只读**的文本来源，靠它自己的 `aria-label` 与 class 后缀（`userText` / `assistantText`）定位；
+相位用它的通话控件（通话中会自称「结束实时语音」）。provider 一行未改。
+
+![Live Transcript](docs/screenshots/live_voice_transcript.png)
+
 ## 状态显示（只在 Composer 附近，不占界面）
 
 | 相位（provider 自己发布） | 显示 |

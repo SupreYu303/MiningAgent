@@ -5,8 +5,8 @@
 
 ## 0. 一句话
 
-* 机器可验证的 17 项（冷启动 / 📞 入口 / 相位条 / 闸门 / 确认前不执行 / 取消不产生任务）**17/17 PASS**；
-* 离线回归 5 套 **131/131 PASS**；
+* 机器可验证的 **25** 项（冷启动 / 📞 入口 / 相位条 / 字幕 / 闸门 / 确认前不执行 / 取消不产生任务）**25/25 PASS**；
+* 离线回归 5 套 **140/140 PASS**（client-contract 45 → **54**，新增 9 项 Live Transcript 断言）；
 * **必须人工对麦克风**的 3 项（中文听感、连续对话体感、barge-in 听感延迟）在此文档中如实标为待人工，不由脚本断言。
 
 ## 1. 复现命令
@@ -21,6 +21,8 @@ powershell -File blast_live_voice\scripts\start-studio.ps1 -Restart -Cdp
 
 # 生产验收（真渲染进程；会开一个真实会话轮次，不会启动任何工程计算）
 node blast_live_voice\scripts\probe-studio-live.mjs --timeout 60000
+# 追加 Live Transcript 一节（会把一句合成的话真的写进当前会话，这是被测行为本身）
+node blast_live_voice\scripts\probe-studio-live.mjs --timeout 60000 --transcript-sim
 # 证据：blast_live_voice/runtime/probe-studio-live.json
 ```
 
@@ -60,6 +62,29 @@ process/display/profile id 混用的问题已消除）。
 | 16 | 取消闸门成功（方案未改变） | PASS | `status=cancelled` |
 | 17 | 取消后闸门文件没有 task_id | PASS | `taskId=undefined` |
 
+### 3.1 Live Transcript（`--transcript-sim`，第 18–25 项）
+
+这一节**不改 provider**：把 provider 自己的那段 DOM（相位元素 / 通话按钮 / 转写面）在页面里合成出来，
+让插件按它**真实依赖的选择器**去读——验证的是我们的代码路径本身。
+
+| # | 检查 | 结果 | 证据 |
+|---|---|---|---|
+| 18 | 用户当前语音以单行字幕实时显示 | PASS | `kind=user`，`🎙把井筒直径改成 6 米` |
+| 19 | 字幕只有一行（不是面板） | PASS | `lines=1`（CSS 断言 `max-width:30ch` + `ellipsis`，无 `position:fixed`） |
+| 20 | Agent 当前语音同样以字幕流式显示 | PASS | `kind=assistant`，`🔊井筒直径要改成 6 米，我先给出参数差异…` |
+| 21 | 离开「聆听」即判定为最终转写 | PASS | `finals=1` |
+| 22 | **最终转写作为正常 User Message 写入当前 Conversation** | PASS | `submitted=1`，会话回合 `2→3`，页面文本含该句 |
+| 23 | **字幕没有执行权限**（工程侧仍停在人工确认） | PASS | `gate.status=cancelled`，`taskId=null` |
+| 24 | Live Transcript 有审计轨迹 | PASS | `runtime/transcripts.jsonl`，`reason=user-message` |
+| 25 | 通话结束后字幕消失、Composer 恢复默认 | PASS | `call=0 lines=0` |
+
+契约层（离线、不依赖 DSH）另有 9 项负向/结构断言：字幕读的是 provider 自己的锚点、
+只有一行、写回走 Composer、**字幕路径里不含 `/gate/`、`run_analysis`、`blast_engine`**、
+我们自己的写回不会被误判成「打字触发的参数变更」、provider 的占位文案不会被当成字幕。
+
+截图：`docs/screenshots/live_voice_transcript.png`（Composer 行内 `● 正在聆听` + `🎙 把井筒直径改成 6 米`，
+下方仍是 Parameter Diff 卡，三栏与 Preview 不变）。
+
 截图（真机、目标形态）：`docs/screenshots/live_voice_gate.png`
 —— 三栏结构不变、Composer 右侧蓝色 📞、其下方就是 Parameter Diff 卡与两个人工动作，界面上没有大 Voice Orb。
 
@@ -70,7 +95,7 @@ process/display/profile id 混用的问题已消除）。
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
-| client-contract | `node blast_engineering_ui\tools\client-contract-test.mjs` | **45/45** |
+| client-contract | `node blast_engineering_ui\tools\client-contract-test.mjs` | **54/54**（含 9 项 Live Transcript 断言） |
 | host-contract | `node blast_engineering_ui\tools\host-contract-test.mjs` | **17/17** |
 | selftest（数据层，真台账 + 真 CLI） | `node blast_engineering_ui\tools\selftest.mjs` | **19/19** |
 | voice-selftest | `node blast_engineering_ui\tools\voice-selftest.mjs` | **17/17** |
@@ -116,6 +141,7 @@ Live Voice 生产验收 **17/17**。
 | Conversation | ✅ 同一对话 / Case / Design Version | §3 #3/#13 |
 | Preview | ✅ 未改动（同一条 activity → artifact 链） | 设计不变 |
 | SenseVoice fallback | ✅ `dsh-voice-scribe` 未动，仍随 profile 加载 | §4 |
+| Live Transcript（用户/Agent 实时字幕） | ✅ 机器 PASS（显示 + 单行 + final 判定 + 写回 + 无执行权限） | §3.1 #18–#25 |
 | cold restart | ✅ | §2 |
 | no credential leakage | ✅ 本包不写 key；扫描见 PUBLIC_RELEASE_AUDIT | 发布扫描 |
 | DSH Core untouched | ✅ | 无 Core 文件改动，只改 profile patch 与 junction |
