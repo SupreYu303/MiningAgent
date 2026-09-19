@@ -10,6 +10,7 @@
 | 组件 | 内容 | 版本 |
 |---|---|---|
 | `blast_engineering_ui/` | **BLAST Studio** —— Conversation-Native 工程工作区（DeepSeek Harness 客户端插件） | `0.4.0-conversation-native` |
+| `blast_live_voice/` | **Live Voice product 层** —— Qwen Audio Realtime Plus（第三方 provider）与工程动作之间的唯一闸门（Parameter Diff / Action Gate + 人在环许可） | `1.0.0` |
 | `agent_adapter/` | **Agent 适配层** —— 11 个只搬运/整形、不计算的工具 + JSON 信封 + 结果契约 + 工具目录 | `1.0.0` |
 | `docs/` | 结果契约、适配层说明、公开版审计与精选真机截图 | — |
 
@@ -80,7 +81,34 @@
 Artifact rendering`，任一阶段非 PASS 都在界面上原样呈现（例如
 `GEOMETRY_PASS_CHARGE_REVIEW`、`RESOLVED`）。
 
-### 2.2 执行中与完成后的两种形态
+### 2.2 三种输入方式，同一个工程系统
+
+```
+文字 ─┐
+语音（SenseVoice 单次，本地、离线）─┼─► 同一个 Conversation / Case / Design Version
+Qwen Live Voice（连续实时、可插话）┘    同一个 Parameter Diff 闸门 / 同一个 Engineering Core / 同一个 Preview
+```
+
+实时语音只是**新的输入层**，不构成第二套工程系统。说话提出的参数变更不会被执行：
+
+```
+用户说「把井筒直径改成 6 米」
+  → Qwen 把工程意图交给当前会话（handoff_to_dsh_agent）
+  → agent 只能调 `blast_live_gate_request`（开闸门，不执行）
+  → 对话里出现 Parameter Diff：shaft_diameter_m 5.5 m → 6 m   [取消] [创建版本]
+       （旧值来自当前设计版本的真实输入 canonical-result；此时 task_id 为空）
+  → 人点【创建版本】才启动真实 run-analysis（唯一执行入口）
+```
+
+硬保证：`blast_engine.run_analysis` 在 Live 通话活跃时**必须**持有人工确认的人在环许可
+（parameter + to + parentTaskId 逐字一致，差异由父版本真实输入现算），否则 fail-closed；
+没有通话时文字路径行为不变。安装、状态词汇、凭据与回滚见
+[`blast_live_voice/README.md`](blast_live_voice/README.md)，
+验收矩阵见 [`blast_live_voice/docs/LIVE_VOICE_PRODUCTION_ACCEPTANCE.md`](blast_live_voice/docs/LIVE_VOICE_PRODUCTION_ACCEPTANCE.md)。
+
+---
+
+### 2.3 执行中与完成后的两种形态
 
 | 执行中：6 步 Trace 逐条点亮 + 原生「Deep diving」 | 完成后：本轮工程记录 + 指标 + 交付物链接 |
 |---|---|

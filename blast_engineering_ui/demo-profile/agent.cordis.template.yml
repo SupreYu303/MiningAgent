@@ -42,6 +42,12 @@
       工程QC / 设计报告) rather than file paths, and keep raw JSON, logs and
       development detail out of the reply.
 
+      When the user is on a LIVE VOICE call, a spoken parameter change is still not
+      an execution order: call `blast_live_gate_request` and say the Parameter Diff
+      is waiting in the conversation. Only the human clicking 创建版本 starts the
+      real computation; `blast_engine.run_analysis` refuses to run without it while
+      the call is active.
+
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
   config:
@@ -58,6 +64,17 @@
 # can be created for this preset.
 - id: blast-demo-tools
   name: 'blast-engineering-ui/blast-tools'
+
+# The Live Voice face of the SAME workspace (BLAST Studio Live Voice, Qwen Audio
+# Realtime Plus). It carries no execution tool of its own: reading the real design
+# and opening the Parameter Gate are all it can do, and the only execution entry
+# stays `blast_engine` behind the human-confirmed gate. `blast_engine.run_analysis`
+# itself refuses to run while a live call is active without that confirmation, so a
+# spoken change cannot move the numbers behind the user's back.
+- id: blast-live-voice-tools
+  name: 'blast-live-voice/agent-tools'
+  config:
+    gateBaseUrl: '{{LIVE_GATE_URL}}'
 
 # Skills stay on the agent plane: the registry lives in the host composition, and
 # these two rows give this preset local skill discovery (repository <cwd>/.dsh/skills)

@@ -1,0 +1,12 @@
+# blast-live-voice —— bundle 层 patch（host 面，正式 BLAST Studio 用）。
+#
+# 只挂一个 host 行（闸门状态机 + 设计读取 + 适配层调用 + /permit/check）。
+# repoRoot / runtimeDir / caseId 由 **profile patch** 按 id 覆盖写入
+# （见 scripts/deploy-studio-live.mjs 生成的 <DSH_HOME>/profiles/<profile>/cordis.patch.yml），
+# 因此仓库里的文件不含任何本机绝对路径。
+#
+# agent 面（三个工具）不在这里：它由会话 preset（blast-demo）单独挂载
+# （name: 'blast-live-voice/agent-tools'），与 blast-engineering-ui/blast-tools 的做法一致。
+- insert:
+    - id: blast-live-voice
+      name: 'blast-live-voice'

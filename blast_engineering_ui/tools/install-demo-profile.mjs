@@ -44,11 +44,23 @@ const mode = flag('status') ? 'status' : flag('uninstall') ? 'uninstall' : 'inst
 
 const out = (line) => console.log(line)
 
+// The Live Voice gate base URL comes from ONE source: `blast_live_voice/lib/studio.mjs`
+// (profile id / package names / ports live there and nowhere else). If the live layer
+// is not present in this checkout, the documented default is used and the preset still
+// installs — the Studio keeps working, only the live row has nothing to talk to.
+let liveGateUrl = process.env.BLAST_LIVE_VOICE_GATE_URL
+  || `http://127.0.0.1:${process.env.BLAST_STUDIO_PORT || 43120}/blast-live-voice`
+try {
+  const studio = await import(new URL('../../blast_live_voice/lib/studio.mjs', import.meta.url).href)
+  liveGateUrl = studio.gateBaseUrl()
+} catch { /* live layer optional: keep the default above */ }
+
 function renderAssembly() {
   const template = fs.readFileSync(templateFile, 'utf8')
   return template
     .replace(/\{\{PLUGIN_FILE\}\}/g, pluginFile.split(path.sep).join('/'))
     .replace(/\{\{REPO_ROOT\}\}/g, repoRoot.split(path.sep).join('/'))
+    .replace(/\{\{LIVE_GATE_URL\}\}/g, liveGateUrl)
 }
 
 function describe() {

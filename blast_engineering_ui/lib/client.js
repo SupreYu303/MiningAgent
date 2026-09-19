@@ -302,6 +302,22 @@ window.__ModuleLoader__.load({
         + ".bs-logo-button *::after{animation-duration:1ms!important;transition-duration:1ms!important}}",
     ].join("");
 
+    // ── Live Voice (Qwen realtime audio) — a restrained composer-adjacent strip ──
+    // The realtime provider plugin owns the call itself (it registers its own call
+    // button in `conversation.input.right` and its own floating orb). What is added
+    // here is only the light state the brief asks for ("正在连接… / ● 正在聆听 /
+    // BLAST Studio 正在回应") and the Parameter Diff of a spoken change.
+    // The provider's *expanded* overlay is suppressed: Live Voice never takes over
+    // the workspace, and everything it shows (transcripts, approvals) is either in
+    // the native conversation already or reachable from the orb it keeps.
+    const CSS_LIVE = [
+      ".beu-live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9aa7b4;white-space:nowrap}",
+      ".beu-live .beu-live-dot{width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block}",
+      ".beu-live[data-live-tone=busy] .beu-live-dot{background:#60a5fa}",
+      ".beu-live[data-live-tone=connecting] .beu-live-dot{background:#fbbf24}",
+      '[aria-label="实时语音通话"]{display:none!important}',
+    ].join("");
+
     /** Inject the plugin stylesheet once (idempotent across hot reloads). */
     function installCss() {
       if (typeof document === "undefined") return () => {};
@@ -310,7 +326,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement("style");
       tag.dataset.plugin = "blast-engineering-ui";
       tag.dataset.pluginCss = tagId;
-      tag.textContent = CSS + CSS_ENG + CSS_SURF + CSS_PV + CSS_BRAND + CSS_BRAND_HERO;
+      tag.textContent = CSS + CSS_ENG + CSS_SURF + CSS_PV + CSS_BRAND + CSS_BRAND_HERO + CSS_LIVE;
       document.head.appendChild(tag);
       return () => { try { tag.remove() } catch (error) { /* ignore */ } };
     }
@@ -724,6 +740,177 @@ window.__ModuleLoader__.load({
           return payload;
         })
         .catch(() => { setState({ activity: null }); return null });
+    }
+
+    // ── Live Voice state (host side: `blast-live-voice`) ────────────────────
+    // Two honest sources, and no third one:
+    //   * the Parameter Gate and the call occupancy come from the project's own
+    //     host route (`/blast-live-voice/live`), polled from here;
+    //   * the realtime phase comes from the provider plugin's own published client
+    //     state, read off the `data-phase` attribute of the element it labels
+    //     `实时语音：…` (read-only; the plugin is not modified).
+    function resolveLiveBase() {
+      if (typeof location !== "undefined" && location.protocol.startsWith("http")) {
+        return location.origin + "/blast-live-voice";
+      }
+      return "http://127.0.0.1:43120/blast-live-voice";
+    }
+    const LIVE_BASE = resolveLiveBase();
+
+    /** The composer-adjacent wording (one source; never a second vocabulary). */
+    const LIVE_TEXT = {
+      "requesting-permission": "正在连接…",
+      connecting: "正在连接…",
+      reconnecting: "正在连接…",
+      listening: "● 正在聆听",
+      thinking: "BLAST Studio 正在回应",
+      "agent-working": "BLAST Studio 正在回应",
+      speaking: "BLAST Studio 正在回应",
+      error: "实时语音不可用",
+    };
+    const LIVE_TONE = {
+      "requesting-permission": "connecting", connecting: "connecting", reconnecting: "connecting",
+      listening: "listening", thinking: "busy", "agent-working": "busy", speaking: "busy", error: "error",
+    };
+
+    const liveState = { phase: "", call: false, gate: null, voiceInstalled: false, error: null, updatedAt: 0 };
+    // `useSyncExternalStore` compares snapshots by identity, so the published view is a
+    // fresh object per update (mutating one object in place would never re-render).
+    let liveView = liveState;
+    const liveListeners = new Set();
+
+    function liveSet(patch) {
+      Object.assign(liveState, patch);
+      liveView = Object.assign({}, liveState);
+      liveListeners.forEach((fn) => {
+        try { fn() } catch (error) { console.error("blast-engineering-ui: live listener failed", error) }
+      });
+    }
+
+    function subscribeLive(fn) {
+      liveListeners.add(fn);
+      return () => liveListeners.delete(fn);
+    }
+
+    function liveSnapshot() { return liveView }
+
+    function useLive() {
+      return React.useSyncExternalStore(subscribeLive, liveSnapshot, liveSnapshot);
+    }
+
+    /** The provider plugin's own phase, read (never written) off its labelled element. */
+    function readLivePhaseFromDom() {
+      try {
+        const node = document.querySelector('[aria-label^="实时语音："]');
+        const phase = node && node.getAttribute ? node.getAttribute("data-phase") : null;
+        return typeof phase === "string" ? phase : "";
+      } catch (error) { return "" }
+    }
+
+    /**
+     * Whether a live call is up. The provider's call control in this same composer
+     * seat is the honest signal: it re-labels itself 「结束实时语音」 for the whole
+     * life of a call. (The host cannot ask the provider's status route: DSH Desktop
+     * only serves its own renderer — `DesktopWebServer.permits` rejects plain
+     * loopback HTTP — so this side reports the presence to the project's own route.)
+     */
+    function readLiveCallFromDom() {
+      try {
+        return document.querySelector('[aria-label="结束实时语音"]') !== null;
+      } catch (error) { return false }
+    }
+
+    /** The provider's call control exists at all (Live Voice installed in this profile). */
+    function liveButtonPresent() {
+      try {
+        return document.querySelector('[aria-label="开始实时语音"],[aria-label="结束实时语音"],[aria-label="实时语音已被其他客户端占用"]') !== null;
+      } catch (error) { return false }
+    }
+
+    function livePhase() {
+      const phase = readLivePhaseFromDom();
+      return phase === "idle" ? "" : phase;
+    }
+
+    let presenceSent = "";
+    let presenceAt = 0;
+    function reportLivePresence() {
+      const phase = livePhase();
+      const call = readLiveCallFromDom();
+      const fingerprint = (call ? "1" : "0") + "|" + phase;
+      // Change, or a heartbeat well inside the host's 45 s freshness window.
+      if (fingerprint === presenceSent && Date.now() - presenceAt < 15000) return Promise.resolve(null);
+      presenceSent = fingerprint;
+      presenceAt = Date.now();
+      return fetch(LIVE_BASE + "/voice/presence", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ active: call, phase: phase || null }),
+      }).then((response) => response.json().catch(() => null))
+        .catch(() => { presenceSent = ""; return null });
+    }
+
+    function loadLive() {
+      const phase = livePhase();
+      const call = readLiveCallFromDom();
+      return fetch(LIVE_BASE + "/live", { headers: { accept: "application/json" }, cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          liveSet({
+            phase,
+            call,
+            voiceInstalled: liveButtonPresent(),
+            gate: payload && payload.gate ? payload.gate : null,
+            error: payload ? null : "live API unavailable",
+            updatedAt: Date.now(),
+          });
+          return payload;
+        })
+        .catch((error) => {
+          liveSet({ phase, call, gate: null, error: String(error && error.message ? error.message : error), updatedAt: Date.now() });
+          return null;
+        });
+    }
+
+    /**
+     * One shared 2 s poll: report this renderer's live presence (the only side that can
+     * see it) and read the project's own gate back. The live route is cheap — no CLI
+     * call, the design snapshot behind it is cached for 15 s.
+     */
+    function useLivePolling(enabled) {
+      React.useEffect(() => {
+        if (!enabled) return () => {};
+        reportLivePresence();
+        loadLive();
+        const timer = setInterval(() => {
+          reportLivePresence();
+          loadLive();
+        }, 2000);
+        return () => clearInterval(timer);
+      }, [enabled]);
+    }
+
+    /** The two human actions on a spoken change; both hit the host, never the model. */
+    function liveGateAction(action) {
+      return fetch(LIVE_BASE + "/gate/" + action, {
+        method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+      }).then((response) => response.json().catch(() => null)).then((payload) => {
+        loadLive();
+        if (action === "confirm" && payload && payload.gate) loadActivity(payload.gate.caseId);
+        return payload;
+      });
+    }
+
+    /**
+     * A spoken change is worth showing while it is pending / being confirmed / running,
+     * and for a short while after it finished (so the answer to "what happened?" stays
+     * on screen). Older records simply stop being shown; nothing is deleted.
+     */
+    function liveGateVisible(gate) {
+      if (!gate || !gate.status) return false;
+      if (gate.status === "pending") return true;
+      if (gate.status === "running" || gate.status === "queued") return true;
+      const stamp = Date.parse(gate.finishedAt || gate.cancelledAt || gate.confirmedAt || gate.createdAt || "");
+      return Number.isFinite(stamp) && Date.now() - stamp < 10 * 60 * 1000;
     }
 
     let validationNonce = 0;
@@ -1501,6 +1688,11 @@ window.__ModuleLoader__.load({
       const engine = useEngine();
       const sessionId = props.sessionId || null;
       const sessionRecord = useRecord(sessionId);
+      // Live Voice (Qwen realtime): the call itself belongs to the provider plugin;
+      // this strip only mirrors its phase and the project's own gate next to the
+      // composer. `useLivePolling` is a no-op shape when no session is open.
+      const live = useLive();
+      useLivePolling(Boolean(sessionId));
       const provided = props.input && typeof props.input.draft === "string" ? props.input.draft : "";
       // Fallback source of truth: when the input machine reports no draft (boot
       // races, a composer mounted before its state settles) read the native
@@ -1587,6 +1779,16 @@ window.__ModuleLoader__.load({
             if (result === "no-mic-button") voiceSet({ note: "没找到 dsh-voice-scribe 的麦克风按钮" });
           },
         }, "🎙"));
+      }
+      const liveWording = live.phase ? (LIVE_TEXT[live.phase] || "") : "";
+      if (!listening && !transcribing && liveWording !== "") {
+        items.push(h("span", {
+          className: "beu-live", key: "live-voice",
+          "data-live-phase": live.phase,
+          "data-live-tone": LIVE_TONE[live.phase] || "listening",
+          "data-live-call": live.call ? "1" : "0",
+          title: "Qwen Audio Realtime Plus 实时语音：连续对话，说话即可打断",
+        }, h("span", { className: "beu-live-dot" }), liveWording));
       }
       if (!listening && !transcribing && voice.note) {
         items.push(h("span", { key: "note", className: "beu-voice-note", title: voice.note }, voice.note));
@@ -1782,6 +1984,7 @@ window.__ModuleLoader__.load({
       const engine = useEngine();
       const sessionId = props.sessionId || null;
       const record = useRecord(sessionId);
+      const live = useLive();
       const caseId = engine.caseId;
 
       React.useEffect(() => {
@@ -1792,14 +1995,19 @@ window.__ModuleLoader__.load({
       }, [caseId]);
 
       const gate = record && record.gate ? record.gate : null;
+      // A change that came in over the realtime voice channel: the Parameter Diff is
+      // the project's own (real old value from canonical-result), so it is shown here
+      // with the same two human actions. Not a second gate — the same gate, other door.
+      const liveGate = live.gate && live.gate.gateId && liveGateVisible(live.gate) ? live.gate : null;
       const latest = engine.activity && engine.activity.latest;
       const running = Boolean(latest && latest.running);
       const result = record && record.taskId && !running && record.dockHidden !== record.taskId ? record : null;
-      if (!gate && !running && !result) return null;
+      if (!gate && !liveGate && !running && !result) return null;
 
-      return h("div", { className: "beu beu-dock", "data-blast-dock": gate ? "gate" : (running ? "running" : "done") },
-        gate ? h(ChangeGateBlock, { gate, rows: record.diffRows || [], sessionId, inputActions: props.inputActions })
-          : null,
+      return h("div", { className: "beu beu-dock", "data-blast-dock": gate || liveGate ? "gate" : (running ? "running" : "done") },
+        liveGate ? h(LiveGateBlock, { gate: liveGate, live })
+          : gate ? h(ChangeGateBlock, { gate, rows: record.diffRows || [], sessionId, inputActions: props.inputActions })
+            : null,
         running
           ? h("div", null,
             h("div", { className: "beu-dock-head" },
@@ -1886,6 +2094,66 @@ window.__ModuleLoader__.load({
             type: "button", className: "beu-btn", "data-primary": "1", "data-gate-action": "confirm",
             disabled: destructive || rows.length === 0, onClick: confirm,
           }, destructive ? "需文字确认" : "Create version")));
+    }
+
+    /**
+     * The spoken-change gate (Live Voice). Same discipline as ChangeGateBlock above
+     * and the same two human actions — but nothing here is parsed in the browser:
+     * the parameter, the REAL old value and the unit come from the project's own
+     * canonical result through the `blast-live-voice` host route, and 创建版本 is the
+     * only thing that can start the real computation (the host refuses to run without
+     * that human confirmation, and `task_id` stays empty until it happens).
+     */
+    function LiveGateBlock(props) {
+      const gate = props.gate;
+      const [busy, setBusy] = React.useState("");
+      const [note, setNote] = React.useState("");
+      if (!gate) return null;
+      const unit = gate.unit ? " " + gate.unit : "";
+      const rows = [{
+        field: gate.parameter,
+        label: gate.labelCn || gate.parameter,
+        from: gate.from === undefined || gate.from === null ? "—" : fmtNum(gate.from) + unit,
+        to: fmtNum(gate.to) + unit,
+      }];
+      const pending = gate.status === "pending";
+      const run = (action) => {
+        setBusy(action);
+        setNote("");
+        liveGateAction(action)
+          .then((payload) => {
+            setBusy("");
+            if (!payload || !payload.ok) {
+              setNote((payload && (payload.summary || payload.reason)) || "操作未被接受");
+            }
+          })
+          .catch((error) => { setBusy(""); setNote(String(error && error.message ? error.message : error)) });
+      };
+
+      return h("div", { "data-blast-live-gate": gate.status },
+        h("div", { className: "beu-eng-head" },
+          h("span", { className: "beu-eng-title" }, BRAND.name),
+          h("span", { className: "beu-chip", "data-tone": "warn" }, "实时语音提出一个参数变化")),
+        h("div", { className: "beu-reason" },
+          "差异里的旧值来自当前设计版本的真实输入（canonical-result）；确认前不执行任何计算。"),
+        h(DiffRows, { rows }),
+        note ? h("div", { className: "beu-reason", "data-live-gate-note": "1" }, note) : null,
+        pending
+          ? h("div", { className: "beu-gate-actions" },
+            h("button", {
+              type: "button", className: "beu-btn", "data-live-gate-action": "cancel",
+              disabled: busy !== "", onClick: () => run("cancel"),
+            }, "取消"),
+            h("button", {
+              type: "button", className: "beu-btn", "data-primary": "1", "data-live-gate-action": "confirm",
+              disabled: busy !== "", onClick: () => run("confirm"),
+            }, busy === "confirm" ? "正在启动…" : "创建版本"))
+          : h("div", { className: "beu-meta", "data-live-gate-state": gate.status },
+            gate.status === "cancelled"
+              ? "已取消：方案未改变（" + rows[0].label + " 保持 " + rows[0].from + "）。"
+              : gate.status === "done" || gate.status === "failed"
+                ? "已确认并完成：任务 " + ((gate.result && gate.result.taskId) || gate.taskId || "—")
+                : "已确认，真实计算进行中（任务 " + (gate.taskId || "—") + "，phase " + (gate.phase || "—") + "）。"));
     }
 
     // ── centre: engineering nodes inside the native thread ──────────────────

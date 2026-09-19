@@ -231,8 +231,9 @@ record('provenance records the interpreter and the environment it passed',
 const rendered = fs.readFileSync(path.join(pluginRoot, 'demo-profile', 'agent.cordis.template.yml'), 'utf8')
   .replace(/\{\{PLUGIN_FILE\}\}/g, pluginFile.split(path.sep).join('/'))
   .replace(/\{\{REPO_ROOT\}\}/g, repoRoot.split(path.sep).join('/'))
+  .replace(/\{\{LIVE_GATE_URL\}\}/g, 'http://127.0.0.1:43120/blast-live-voice')
 record('preset template has no unresolved installer placeholder',
-  !/\{\{(PLUGIN_FILE|REPO_ROOT)\}\}/.test(rendered))
+  !/\{\{(PLUGIN_FILE|REPO_ROOT|LIVE_GATE_URL)\}\}/.test(rendered))
 // `{{cwd}}` / `{{model}}` are DSH's own runtime placeholders (dsh-persona resolves
 // them), so the check runs on the row list only, with comments stripped.
 const rowLines = rendered.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n')
@@ -241,6 +242,12 @@ record('preset mounts our tool plugin and no general shell/fs tool',
   && !/dsh-tool-pwsh|dsh-tool-bash|dsh-tool-fs\b/.test(rowLines)
   && !rowLines.includes('danger-full-access'),
   `${rendered.split('\n').length} lines`)
+// Live Voice row: the agent plane gets exactly the gate tools (no execution tool),
+// and the row is told where the project's own gate lives.
+record('preset mounts the Live Voice gate tools row',
+  rowLines.includes("name: 'blast-live-voice/agent-tools'"))
+record('the Live Voice row carries the project gate URL',
+  /gateBaseUrl:\s*'http:\/\/127\.0\.0\.1:\d+\/blast-live-voice'/.test(rowLines))
 
 
 const failed = checks.filter((check) => !check.ok)
