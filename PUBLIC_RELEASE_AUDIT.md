@@ -239,4 +239,17 @@ Select-String -Path docs\assets\*.png -Pattern 'C:\\Users|AgentWorkspace|blast_p
 > 与首次发布相同的免责：截图中的案例名、参数与指标是本项目真实运行的产物，仅用于展示界面形态，
 > 不构成工程结论；系统输出为 `CANDIDATE_REFERENCE`，采用前须工程师复核。
 
+### 9.1 Live Transcript（同分支后续提交，2026-09-19）
+
+在既有 Live Voice 上加了**实时字幕**（用户当前语音 + Agent 当前语音的单行省略字幕），
+并把 final transcript 作为**一条普通 User Message** 写进当前会话：
+
+| 项 | 值 |
+|---|---|
+| 改动文件 | `blast_engineering_ui/lib/client.js`（字幕读取/显示/写回）、`blast_live_voice/lib/routes.mjs`（`/transcript` 审计轨迹）、`blast_live_voice/lib/host.mjs`、验收与说明文档 |
+| 新增证据 | `blast_live_voice/docs/screenshots/live_voice_transcript.png` |
+| 纪律 | 字幕路径内**不含** `/gate/`、`run_analysis`、`blast_engine`（契约测试有负向断言）——参数修改的执行依据仍是人工确认的 Parameter Diff；provider 代码零改动 |
+| 验证 | `probe-studio-live --transcript-sim` **25/25**；`client-contract` **54/54**；`conversation_native_acceptance` **21/21** |
+| 发布后复扫 | 秘钥模式 / 本机路径 / 内部目录名 **0 命中** |
+
 全部步骤均为只读于私有仓库、仅写入本仓库。任何数值与截图均未由人/AI 估算或修饰。</sub>

@@ -315,6 +315,10 @@ window.__ModuleLoader__.load({
       ".beu-live .beu-live-dot{width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block}",
       ".beu-live[data-live-tone=busy] .beu-live-dot{background:#60a5fa}",
       ".beu-live[data-live-tone=connecting] .beu-live-dot{background:#fbbf24}",
+      // Live Transcript: one restrained, ellipsized line — never a panel.
+      ".beu-live-transcript{display:inline-flex;align-items:baseline;gap:5px;max-width:30ch;overflow:hidden;",
+      "text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#c3d0dd;flex:0 1 auto;min-width:0}",
+      ".beu-live-transcript .beu-live-speaker{opacity:.75;font-size:11px}",
       '[aria-label="实时语音通话"]{display:none!important}',
     ].join("");
 
@@ -849,44 +853,190 @@ window.__ModuleLoader__.load({
         .catch(() => { presenceSent = ""; return null });
     }
 
+    // ── Live Transcript (read-only mirror + one honest write-back) ──────────
+    // Sources, both owned by the provider, neither modified by us:
+    //   * its transcript surface (the call card it collapsed under CSS, still rendered
+    //     while a call is up): `userText` / `assistantText` are CSS-module class
+    //     suffixes of its own stylesheet, so the anchor is stable across its builds;
+    //   * its call control, which re-labels itself 「结束实时语音」 for the whole call.
+    // What this plugin does with them:
+    //   * one ellipsized line next to the composer (interim text included);
+    //   * once per finalized utterance, the user's own words are written into the
+    //     conversation as a normal user message — a subtitle never opens a gate and
+    //     never runs anything, so the execution basis stays the human-confirmed
+    //     Parameter Diff (and the permit interlock still refuses a run while a call is up).
+    const TRANSCRIPT_PLACEHOLDERS = ["正在聆听…", "你可以直接交代任务、追问进度或随时纠正方向。"];
+
+    function readProviderTranscript(kind) {
+      try {
+        const node = document.querySelector('[aria-label="实时语音通话"] [class*="' + kind + '"]');
+        const text = node ? String(node.textContent || "").replace(/\s+/g, " ").trim() : "";
+        if (text === "" || TRANSCRIPT_PLACEHOLDERS.indexOf(text) >= 0) return "";
+        return text;
+      } catch (error) { return "" }
+    }
+
+    const transcriptState = {
+      pending: "",        // what the user is saying right now (interim included)
+      lastFinal: "",      // last finalized utterance (dedupe)
+      lastSubmitted: "",  // last one we already wrote into the conversation
+      writing: false,     // composer write-back in flight (suppresses our own text gate)
+      finals: 0,
+      submitted: 0,
+      skipped: 0,
+    };
+    let turnWatermark = null;
+
+    /** The composer dock must not treat our own transcript write-back as a typed change. */
+    function transcriptWriting() { return transcriptState.writing }
+
+    function noteTurnWatermark(turn) {
+      if (typeof turn === "number") turnWatermark = turn;
+    }
+
+    /**
+     * A finalized utterance = the user's transcript at the moment the provider stops
+     * listening (its own phase leaves `listening`). Nothing is invented: empty text and
+     * a repeat of the previous utterance are simply not an utterance.
+     */
+    function finalizeUtterance(phase, call) {
+      if (!call) { transcriptState.pending = ""; return "" }
+      const spoken = readProviderTranscript("userText");
+      if (phase === "listening") {
+        if (spoken !== "") transcriptState.pending = spoken;
+        return "";
+      }
+      const text = transcriptState.pending;
+      transcriptState.pending = "";
+      if (text === "" || text === transcriptState.lastFinal) return "";
+      transcriptState.lastFinal = text;
+      transcriptState.finals += 1;
+      return text;
+    }
+
+    /** Audit trail for the live transcript (text only — never an engineering action). */
+    function recordTranscript(text, outcome) {
+      try {
+        fetch(LIVE_BASE + "/transcript", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text, submitted: outcome.submitted, reason: outcome.reason }),
+        }).catch(() => null);
+      } catch (error) { /* the audit record must never break the call */ }
+    }
+
+    /** Which speaker the one-liner currently belongs to. */
+    function liveTranscriptSpeaker(state) {
+      return state.phase === "speaking" || state.phase === "agent-working" ? "🔊" : "🎙";
+    }
+
+    function liveTranscriptLine(state) {
+      if (!state.call) return "";
+      const speaking = state.phase === "speaking" || state.phase === "agent-working";
+      const preferred = speaking ? state.assistantTranscript : state.userTranscript;
+      const fallback = speaking ? state.userTranscript : state.assistantTranscript;
+      return preferred || fallback || "";
+    }
+
+    /**
+     * Write the user's own words into the current conversation as a normal user message.
+     * If the provider already handed this utterance over (its handoff message carries the
+     * verbatim `<spoken_input>`), the conversation already has it — we stay out of the way.
+     */
+    function scheduleTranscriptWrite(sessionId, text, inputActions) {
+      if (!sessionId || text === "" || text.length < 2) return;
+      if (text === transcriptState.lastSubmitted) return;
+      const before = turnWatermark;
+      setTimeout(() => {
+        if (before !== null && turnWatermark !== null && turnWatermark > before) {
+          transcriptState.skipped += 1;
+          recordTranscript(text, { submitted: false, reason: "already-in-conversation(handoff)" });
+          return;
+        }
+        const ok = submitTranscript(sessionId, text, inputActions);
+        if (ok) transcriptState.submitted += 1;
+        recordTranscript(text, { submitted: ok, reason: ok ? "user-message" : "no-composer" });
+      }, 2500);
+    }
+
+    /** The same face the confirmed change uses: the native composer, then its send. */
+    function submitTranscript(sessionId, text, inputActions) {
+      const actions = inputActions && typeof inputActions.setDraft === "function" ? inputActions : null;
+      const shell = composerShell(sessionId);
+      const target = actions || (shell && typeof shell.setDraft === "function" ? shell : null);
+      if (!target) return false;
+      transcriptState.lastSubmitted = text;
+      transcriptState.writing = true;
+      try {
+        target.setDraft(text);
+      } catch (error) {
+        transcriptState.writing = false;
+        return false;
+      }
+      setTimeout(() => {
+        try {
+          if (actions && typeof actions.submit === "function") actions.submit();
+          else if (shell && typeof shell.submit === "function") shell.submit();
+        } catch (error) { /* the shell reports its own failures */ }
+        setTimeout(() => { transcriptState.writing = false }, 400);
+      }, 80);
+      return true;
+    }
+
     function loadLive() {
-      const phase = livePhase();
-      const call = readLiveCallFromDom();
       return fetch(LIVE_BASE + "/live", { headers: { accept: "application/json" }, cache: "no-store" })
         .then((response) => (response.ok ? response.json() : null))
         .then((payload) => {
           liveSet({
-            phase,
-            call,
-            voiceInstalled: liveButtonPresent(),
             gate: payload && payload.gate ? payload.gate : null,
             error: payload ? null : "live API unavailable",
-            updatedAt: Date.now(),
           });
           return payload;
         })
         .catch((error) => {
-          liveSet({ phase, call, gate: null, error: String(error && error.message ? error.message : error), updatedAt: Date.now() });
+          liveSet({ gate: null, error: String(error && error.message ? error.message : error) });
           return null;
         });
     }
 
     /**
-     * One shared 2 s poll: report this renderer's live presence (the only side that can
-     * see it) and read the project's own gate back. The live route is cheap — no CLI
-     * call, the design snapshot behind it is cached for 15 s.
+     * One shared poll while a session is open. It is fast (400 ms) because a subtitle has
+     * to keep up with speech; the heavier `/live` read happens every fifth tick, and the
+     * presence report throttles itself. Everything here is read-only except the one
+     * finalized-utterance write-back, which goes through the normal composer.
      */
-    function useLivePolling(enabled) {
+    function useLivePolling(enabled, sessionId, inputActions) {
       React.useEffect(() => {
         if (!enabled) return () => {};
+        let ticks = 0;
+        const step = () => {
+          ticks += 1;
+          const phase = livePhase();
+          const call = readLiveCallFromDom();
+          const userTranscript = readProviderTranscript("userText");
+          const assistantTranscript = readProviderTranscript("assistantText");
+          if (phase !== liveState.phase || call !== liveState.call
+            || userTranscript !== liveState.userTranscript
+            || assistantTranscript !== liveState.assistantTranscript) {
+            liveSet({
+              phase, call, userTranscript, assistantTranscript,
+              voiceInstalled: liveButtonPresent(), updatedAt: Date.now(),
+            });
+          }
+          if (call || transcriptState.pending !== "") {
+            const finalUtterance = finalizeUtterance(phase, call);
+            if (finalUtterance !== "") scheduleTranscriptWrite(sessionId, finalUtterance, inputActions);
+          }
+          // Report on every tick: the report itself only fires when call+phase changed
+          // (or every 15 s), so the host learns promptly that a call ended, too.
+          reportLivePresence();
+          if (ticks % 5 === 0) loadLive();
+        };
         reportLivePresence();
         loadLive();
-        const timer = setInterval(() => {
-          reportLivePresence();
-          loadLive();
-        }, 2000);
+        step();
+        const timer = setInterval(step, 400);
         return () => clearInterval(timer);
-      }, [enabled]);
+      }, [enabled, sessionId]);
     }
 
     /** The two human actions on a spoken change; both hit the host, never the model. */
@@ -1692,7 +1842,7 @@ window.__ModuleLoader__.load({
       // this strip only mirrors its phase and the project's own gate next to the
       // composer. `useLivePolling` is a no-op shape when no session is open.
       const live = useLive();
-      useLivePolling(Boolean(sessionId));
+      useLivePolling(Boolean(sessionId), sessionId, props.inputActions);
       const provided = props.input && typeof props.input.draft === "string" ? props.input.draft : "";
       // Fallback source of truth: when the input machine reports no draft (boot
       // races, a composer mounted before its state settles) read the native
@@ -1736,9 +1886,15 @@ window.__ModuleLoader__.load({
         setRecord(sessionId, { maxTurn: newestTurn });
       }, [sessionId, newestTurn]);
 
+      // The live transcript needs the same turn counter: a finalized utterance that the
+      // provider already handed over must not be written a second time (see
+      // scheduleTranscriptWrite in the live section).
+      noteTurnWatermark(newestTurn);
+
       React.useEffect(() => {
         if (!sessionId) return;
         if (draft.includes(INSTRUCTION_MARK)) return;              // our own approved instruction
+        if (transcriptWriting()) return;                           // our own live-transcript write-back
         const record = recordOf(sessionId);
         if (record && record.lastDraft === draft) return;          // this exact draft is already evaluated
         const impact = detectImpact(draft);
@@ -1790,6 +1946,19 @@ window.__ModuleLoader__.load({
           title: "Qwen Audio Realtime Plus 实时语音：连续对话，说话即可打断",
         }, h("span", { className: "beu-live-dot" }), liveWording));
       }
+      // Live Transcript: one ellipsized line. It is a subtitle and nothing else — it
+      // never opens a gate and never submits an engineering action.
+      const transcriptLine = liveTranscriptLine(live);
+      if (!listening && !transcribing && transcriptLine !== "") {
+        items.push(h("span", {
+          className: "beu-live-transcript", key: "live-transcript",
+          "data-live-transcript": liveTranscriptSpeaker(live) === "🎙" ? "user" : "assistant",
+          "data-live-transcript-len": String(transcriptLine.length),
+          title: transcriptLine,
+        },
+        h("span", { className: "beu-live-speaker" }, liveTranscriptSpeaker(live)),
+        transcriptLine));
+      }
       if (!listening && !transcribing && voice.note) {
         items.push(h("span", { key: "note", className: "beu-voice-note", title: voice.note }, voice.note));
       }
@@ -1800,6 +1969,11 @@ window.__ModuleLoader__.load({
       className: "beu beu-voice",
       "data-voice-strip": "1",
       "data-state": voice.state,
+      "data-live-call": live.call ? "1" : "0",
+      "data-live-phase": live.phase || "",
+      "data-live-finals": String(transcriptState.finals),
+      "data-live-submitted": String(transcriptState.submitted),
+      "data-live-skipped": String(transcriptState.skipped),
       "data-voice-draft": String(draft.length),
       "data-voice-session": sessionId ? "1" : "0",
       "data-voice-gate": sessionRecord && sessionRecord.gate ? "1" : "0",
