@@ -203,4 +203,40 @@ Select-String -Path docs\assets\*.png -Pattern 'C:\\Users|AgentWorkspace|blast_p
 ---
 
 <sub>审计生成方式：源侧扫描 → 白名单复制 + 规则化脱敏 → 发布后独立复扫 → 语法与哈希校验；
+---
+
+## 9. `release/blast-studio` · Live Voice 集成发布（2026-09-19）
+
+本次在**同一分支的后续提交**里加入 BLAST Studio 的 Live Voice（Qwen Audio Realtime Plus）
+正式集成，仍**不合并进 `main`**。发布方式与首次一致：白名单逐文件复制 + 确定性脱敏
+（脚本 `blast_live_voice/scripts/publish-public.mjs`，**不是** `git add .`），发布后独立复扫。
+
+| 项 | 值 |
+|---|---|
+| 新增包 | `blast_live_voice/`（23 个受控文件：8 个 lib、4 个 script、README、2 篇 docs、1 张真机截图） |
+| 改动文件 | `blast_engineering_ui/lib/client.js`、`lib/blast-tools.mjs`、`demo-profile/agent.cordis.template.yml`、`tools/install-demo-profile.mjs`、`tools/demo-profile-test.mjs` |
+| 脱敏命中 | `dsh-install`（脚本默认路径 → 改为读环境变量，0 命中）、`user-home` 1 处（文档中的 DSH home） |
+| 发布后复扫 | 秘钥模式 / 本机路径 / 内部目录名 **0 命中** |
+| 未发布 | `blast_live_voice/runtime/**`（闸门状态、在场上报、运行溯源、探针证据）、本机 profile 配置、凭据、POC 内部验证文件 |
+
+**本次发布包含的能力边界**（第三方 provider 不在本仓库内）：
+
+* `blast_live_voice` 只发布**本项目的 product 层**：Parameter Diff / Action Gate 状态机、
+  真实设计读取、adapter CLI 调用、agent 面三个工具、人在环许可（`/permit/check`）；
+* 实时语音 provider（`@harness-remote/dsh-realtime-voice`，MIT）由使用方按
+  `blast_live_voice/README.md` 自行安装（junction 或 `dsh plugin add`），本仓库不重分发其代码；
+* DSH Desktop 的部署只写 `$DSH_HOME`：junction + 一段**带标记**的 profile patch（旧文件先备份），
+  回滚是删除该标记块与两个 junction。
+
+**验证结果**（详见 `blast_live_voice/docs/LIVE_VOICE_PRODUCTION_ACCEPTANCE.md`）：
+
+| 套件 | 结果 |
+|---|---|
+| `probe-studio-live.mjs`（真渲染进程，冷启动后） | **17/17 PASS** |
+| client-contract / host-contract / selftest / voice-selftest / demo-profile-test | **45/45 · 17/17 · 19/19 · 17/17 · 33/33** |
+| 人工对麦克风项（中文听感 / 连续对话 / barge-in 听感） | 由使用方在本机完成（脚本不断言） |
+
+> 与首次发布相同的免责：截图中的案例名、参数与指标是本项目真实运行的产物，仅用于展示界面形态，
+> 不构成工程结论；系统输出为 `CANDIDATE_REFERENCE`，采用前须工程师复核。
+
 全部步骤均为只读于私有仓库、仅写入本仓库。任何数值与截图均未由人/AI 估算或修饰。</sub>

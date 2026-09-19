@@ -252,6 +252,153 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  // ── Live Voice interlock (the same discipline as the gate, enforced here) ──
+  // The Studio's realtime voice path never executes a change by itself; this is the
+  // second, independent door: even if a model decides to call `run_analysis` while a
+  // call is active, the pipeline refuses unless a human confirmed that very change
+  // in the conversation (the gate's permit). When no call is active, the text path
+  // behaves exactly as before.
+  //
+  // Why files and not HTTP: the gate's own host route lives on the same DSH web
+  // server, and DSH Desktop only serves its own renderer (`DesktopWebServer.permits`
+  // rejects plain loopback HTTP with 403). The gate writes its state into the project
+  // runtime dir, which is the honest shared source for both faces.
+  const liveRuntimeDir = path.resolve(config.liveRuntimeDir || path.join(repoRoot, 'blast_live_voice', 'runtime'))
+  const liveGateFile = path.join(liveRuntimeDir, 'gate.json')
+  const liveVoiceFile = path.join(liveRuntimeDir, 'voice.json')
+  const PRESENCE_TTL_MS = 45 * 1000
+
+  function readJsonSafe(file) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null }
+  }
+
+  /** 是否有 Live 通话在进行（渲染进程上报；超过 45 s 未刷新即视为无通话）。 */
+  function liveCallActive() {
+    const voice = readJsonSafe(liveVoiceFile)
+    if (!voice || typeof voice.at !== 'string') return false
+    const fresh = Date.now() - Date.parse(voice.at) < PRESENCE_TTL_MS
+    return fresh && Boolean(voice.active)
+  }
+
+  /** 父版本的真实输入（只读 operation，绝不猜测）。 */
+  async function readParentInputs(parentTaskId) {
+    const result = await runAdapter('canonical_result', { task_id: parentTaskId })
+    let envelope = null
+    try { envelope = JSON.parse(result.out) } catch { return null }
+    return envelope?.results?.canonical?.input?.normalized ?? null
+  }
+
+  async function checkLivePermit(args) {
+    if (!fs.existsSync(liveGateFile) && !fs.existsSync(liveVoiceFile)) {
+      return { ok: true, reason: 'no-live-layer' }          // Live Voice 未安装：文字路径不受影响
+    }
+    if (!liveCallActive()) return { ok: true, reason: 'no-live-call' }
+    const parentTaskId = args.parent_task_id || ''
+    if (!parentTaskId) {
+      return {
+        ok: false, reason: 'no-parent',
+        summary: 'Live 通话进行中，run_analysis 必须带 parent_task_id：没有父版本就无法与人工确认的差异比对，故未执行。',
+      }
+    }
+    let parentInputs = null
+    try { parentInputs = await readParentInputs(parentTaskId) } catch { parentInputs = null }
+    if (!parentInputs) {
+      return {
+        ok: false, reason: 'parent-inputs-unavailable',
+        summary: `读不到父版本 ${parentTaskId} 的真实输入：Live 通话中拒绝执行（不猜值）。`,
+      }
+    }
+    const request = requestOf(args)
+    const changed = []
+    for (const [key, value] of Object.entries(request)) {
+      if (typeof value !== 'number') continue
+      if (typeof parentInputs[key] === 'number' && parentInputs[key] !== value) {
+        changed.push({ parameter: key, from: parentInputs[key], to: value })
+      }
+    }
+    if (changed.length !== 1) {
+      return {
+        ok: false, reason: changed.length === 0 ? 'no-diff' : 'ambiguous-diff',
+        summary: `本次请求相对父版本 ${parentTaskId} 有 ${changed.length} 处变化：Live 通话中只允许逐项人工确认过的单一变更，故未执行。`,
+        changed,
+      }
+    }
+    const gate = readJsonSafe(liveGateFile)
+    const permit = gate?.permit
+    const compare = {
+      parameter: changed[0].parameter, to: changed[0].to, parentTaskId,
+    }
+    let verdict = { ok: false, reason: 'no-permit', summary: '当前没有人工确认过的人在环许可：Live 通话中，实时语音不能直接执行工程计算。请先在对话里确认参数变更（[创建版本]）。' }
+    if (permit) {
+      if (Date.parse(permit.expiresAt) <= Date.now()) {
+        verdict = { ok: false, reason: 'permit-expired', summary: '上次人工确认已超过有效期（15 分钟）：请重新确认后再执行。' }
+      } else if (String(permit.parameter) !== String(compare.parameter) || Number(permit.to) !== Number(compare.to)) {
+        verdict = { ok: false, reason: 'permit-mismatch', summary: `人工确认的是 ${permit.parameter} → ${permit.to}，与本次请求（${compare.parameter} → ${compare.to}）不一致：拒绝执行。` }
+      } else if (String(permit.parentTaskId) !== String(compare.parentTaskId)) {
+        verdict = { ok: false, reason: 'permit-parent-mismatch', summary: `人工确认针对父版本 ${permit.parentTaskId}，与本次请求的 ${compare.parentTaskId} 不一致：拒绝执行。` }
+      } else {
+        verdict = { ok: true, reason: 'human-confirmed', permit }
+      }
+    }
+    recordProvenance({
+      at: new Date().toISOString(), tool: 'blast_engine', operation: 'run_analysis',
+      gate_check: verdict.ok ? 'permit-ok' : `blocked:${verdict.reason}`,
+      permit: permit || null, parent_task_id: parentTaskId, changed,
+    })
+    return verdict
+  }
+
+  // ── tool 1: the engineering path (structured, no shell string) ─────────────
+
+  async function checkLivePermit(args) {
+    let state = null
+    try {
+      const response = await fetch(`${liveBaseUrl}/live`, { headers: { accept: 'application/json' } })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      state = await response.json()
+    } catch (error) {
+      return {
+        ok: false, reason: 'live-api-unavailable',
+        summary: `无法确认 Live Voice 闸门状态（${error.message}）：为保证「确认前不执行」，本次 run_analysis 未执行。`,
+      }
+    }
+    if (!state || !state.voice || !state.voice.active) return { ok: true, reason: 'no-live-call' }
+    const parentTaskId = args.parent_task_id || ''
+    if (!parentTaskId) {
+      return {
+        ok: false, reason: 'no-parent',
+        summary: 'Live 通话进行中，run_analysis 必须带 parent_task_id：没有父版本就无法与人工确认的差异比对，故未执行。',
+      }
+    }
+    try {
+      const response = await fetch(`${liveBaseUrl}/permit/check`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          caller: 'blast_engine:run_analysis',
+          parent_task_id: parentTaskId,
+          inputs: requestOf(args),
+        }),
+      })
+      const body = await response.json().catch(() => null)
+      recordProvenance({
+        at: new Date().toISOString(), tool: 'blast_engine', operation: 'run_analysis',
+        gate_check: body && body.ok ? 'permit-ok' : `blocked:${(body && body.reason) || 'unknown'}`,
+        permit: (body && body.permit) || null, parent_task_id: parentTaskId,
+      })
+      if (body && body.ok) return { ok: true, reason: body.reason, permit: body.permit }
+      return {
+        ok: false, reason: (body && body.reason) || 'permit-rejected',
+        summary: (body && body.summary) || '人工确认校验未通过：本次 run_analysis 未执行。',
+      }
+    } catch (error) {
+      return {
+        ok: false, reason: 'permit-check-failed',
+        summary: `人在环许可校验失败（${error.message}）：本次 run_analysis 未执行。`,
+      }
+    }
+  }
+
   // ── tool 1: the engineering path (structured, no shell string) ─────────────
   ctx.tools.register(defineTool({
     name: 'blast_engine',
@@ -307,6 +454,27 @@ export function apply(ctx, config = {}) {
     async execute(args) {
       assertArgs(args)
       const operation = args.operation
+      // ── Live Voice interlock (fail-closed) ──────────────────────────────────
+      // While a realtime voice call is active, the real computation only runs for a
+      // change a human confirmed in the conversation (the gate's permit). Without a
+      // call nothing changes for the text path; with a call, "the model decided to
+      // run it" is not enough — the numbers cannot move behind the user's back.
+      if (operation === 'run_analysis') {
+        const permit = await checkLivePermit(args)
+        if (!permit.ok) {
+          return {
+            ok: false,
+            operation,
+            summary: permit.summary,
+            argv: [],
+            envelope_json: JSON.stringify({ ok: false, blocked_by: 'live-voice-gate', ...permit }, null, 1),
+            runtime_provenance: JSON.stringify({
+              tool: 'blast_engine', operation, blocked_by: 'live-voice-gate',
+              reason: permit.reason, recorded_at: new Date().toISOString(),
+            }),
+          }
+        }
+      }
       const result = await runAdapter(operation, args)
       let envelope = null
       try { envelope = JSON.parse(result.out) } catch { envelope = null }
