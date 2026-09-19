@@ -2005,9 +2005,12 @@ window.__ModuleLoader__.load({
       if (!gate && !liveGate && !running && !result) return null;
 
       return h("div", { className: "beu beu-dock", "data-blast-dock": gate || liveGate ? "gate" : (running ? "running" : "done") },
+        // Both doors are the same gate; neither may hide the other. A pending spoken
+        // change and a typed change can coexist, and each keeps its own two actions.
         liveGate ? h(LiveGateBlock, { gate: liveGate, live })
-          : gate ? h(ChangeGateBlock, { gate, rows: record.diffRows || [], sessionId, inputActions: props.inputActions })
-            : null,
+          : null,
+        gate ? h(ChangeGateBlock, { gate, rows: record.diffRows || [], sessionId, inputActions: props.inputActions })
+          : null,
         running
           ? h("div", null,
             h("div", { className: "beu-dock-head" },
