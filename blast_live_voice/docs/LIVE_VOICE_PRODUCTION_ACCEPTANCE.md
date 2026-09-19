@@ -75,6 +75,18 @@ process/display/profile id 混用的问题已消除）。
 | selftest（数据层，真台账 + 真 CLI） | `node blast_engineering_ui\tools\selftest.mjs` | **19/19** |
 | voice-selftest | `node blast_engineering_ui\tools\voice-selftest.mjs` | **17/17** |
 | demo-profile-test（含新增的 Live 行断言） | `node blast_engineering_ui\tools\demo-profile-test.mjs` | **33/33** |
+| Conversation-Native 真机验收（24 项断言脚本，实跑 21 步） | `node _stage_probe\conversation_native_acceptance.mjs` | **21/21** |
+| Live Voice POC verify（POC 侧回归，独立 home/端口） | `node blast_live_poc\scripts\verify-poc.mjs` | **19/19** |
+| canonical result consistency（真实案例） | `python -m agent_adapter.cli validate-result-consistency --case-id AGENT_DEMO_1` | `结果自洽，可继续汇报`（含报告语义提示，非阻塞） |
+
+### 4.1 本轮由回归测试发现并修复的缺陷（如实记录）
+
+第一次跑 `conversation_native_acceptance.mjs` 时是 **17/21**：四个“文字参数变更闸门”断言失败。
+根因是我的第一版实现里，ComposerDock 把「语音闸门」与「文字闸门」做成了**互斥渲染**——
+只要语音闸门还在可见窗口内，打字触发的文字闸门就被挤掉（`[data-blast-gate]` 不存在）。
+已改为**两者并存**（同一张闸门卡的两个门，各自保留自己的两个动作），
+复跑 `client-contract` 45/45、`conversation_native_acceptance` **21/21**、
+Live Voice 生产验收 **17/17**。
 
 本轮相对集成前**新增**的断言：preset 模板必须挂 `blast-live-voice/agent-tools` 且带项目闸门 URL
 （`demo-profile-test.mjs`），以及本文件 §3 的 17 项。
