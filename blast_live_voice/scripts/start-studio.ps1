@@ -64,7 +64,10 @@ if ($Restart) {
     $running | Stop-Process -Force
     Start-Sleep -Seconds 4
   }
-  if (-not (Test-Path $Exe)) { throw "DSH Desktop not found. 用 -Exe '<DSH Desktop.exe 路径>' 或设置环境变量 DSH_DESKTOP_EXE。" }
+  if ([string]::IsNullOrWhiteSpace($Exe)) {
+    throw "DSH Desktop path not set. 用 -Exe '<DSH Desktop.exe 路径>' 或设置环境变量 DSH_DESKTOP_EXE。"
+  }
+  if (-not (Test-Path $Exe)) { throw "DSH Desktop not found at $Exe" }
   $appArgs = @()
   if ($Cdp) { $appArgs += "--remote-debugging-port=$CdpPort" }
   Write-Host "starting $Exe $($appArgs -join ' ')"
